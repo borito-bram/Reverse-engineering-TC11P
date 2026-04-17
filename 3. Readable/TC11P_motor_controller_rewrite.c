@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-ddd
+
 /*
  * TC11P motor controller rewrite
  *
