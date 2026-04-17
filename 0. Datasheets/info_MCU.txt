@@ -1,0 +1,2 @@
+chip: STC15F2K60S2
+Chip package: LQFP-44
