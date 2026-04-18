@@ -1,1 +1,1 @@
-- race for up and down button needs to be checked!
+- Trace for up and down button needs to be checked!
