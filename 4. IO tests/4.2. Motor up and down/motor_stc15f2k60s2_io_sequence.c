@@ -1,26 +1,27 @@
 #include <REG51.H>
 
-#ifdef SDCC
-/* SDCC declarations for STC15 extended port and output bits. */
-__sbit __at (0xB5) OUTPUT1; /* P3.5, LQFP-44 pin 6  */
-__sbit __at (0x92) OUTPUT2; /* P1.2, LQFP-44 pin 7  */
-#else
-/* Keil C51 declarations for output bits. */
+/* Keil C51 declarations for STC15 extended port and output bits. */
+sfr P4 = 0xC0;
 sbit OUTPUT1 = P3^5;  /* LQFP-44 pin 6  */
-sbit OUTPUT2 = P1^2;  /* LQFP-44 pin 7  */
-#endif
+sbit OUTPUT2 = P4^7;  /* LQFP-44 pin 7  */
+sbit OUTPUT3 = P1^2;  /* P1.2 */
 
 /*
  * STC15F2K60S2 (LQFP-44)
  * Physical package pin mapping used here:
- *   - Pin 6  -> P3.5 (Output 1)
- *   - Pin 7  -> P1.2 (Output 2)
+ *   - Voltage regulator enable  -> P3.5 (Output 1)
+ *   - Motor up control          -> P4.7 (Output 2)
+ *   - Motor down control        -> P1.2 (Output 3)
  *
  * Sequence in loop:
  * 1) Output 1 HIGH (steady),     wait 10 s
  * 2) Output 2 HIGH (steady),     wait 10 s
- * 4) Output 1 LOW  (steady),     wait 10 s
- * 5) Output 2 LOW  (steady),     wait 10 s
+ * 3) Output 1 LOW  (steady),     wait 10 s
+ * 4) Output 2 LOW  (steady),     wait 10 s
+ * 5) Output 1 HIGH (steady),     wait 10 s
+ * 6) Output 3 HIGH (steady),     wait 10 s
+ * 7) Output 1 LOW  (steady),     wait 10 s
+ * 8) Output 3 LOW  (steady),     wait 10 s
  */
 
 /*
@@ -58,19 +59,24 @@ void main(void)
 {
     OUTPUT1 = 0;
     OUTPUT2 = 0;
+    OUTPUT3 = 0;
 
     while (1)
     {
         OUTPUT1 = 1;
-        delay_10s();
-
         OUTPUT2 = 1;
         delay_10s();
 
         OUTPUT1 = 0;
+        OUTPUT2 = 0;
         delay_10s();
 
-        OUTPUT2 = 0;
+        OUTPUT1 = 1;
+        OUTPUT3 = 1;
+        delay_10s();
+
+        OUTPUT1 = 0;
+        OUTPUT3 = 0;
         delay_10s();
     }
 }

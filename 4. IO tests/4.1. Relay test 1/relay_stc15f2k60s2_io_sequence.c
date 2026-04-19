@@ -1,20 +1,15 @@
 #include <REG51.H>
 
-#ifdef SDCC
-/* SDCC declarations for STC15 extended port and output bits. */
-__sbit __at (0xB5) OUTPUT1; /* P3.5, LQFP-44 pin 6  */
-__sbit __at (0x92) OUTPUT2; /* P1.2, LQFP-44 pin 7  */
-#else
-/* Keil C51 declarations for output bits. */
-sbit OUTPUT1 = P3^5;  /* LQFP-44 pin 6  */
-sbit OUTPUT2 = P1^2;  /* LQFP-44 pin 7  */
-#endif
+/* Keil C51 declarations for STC15 extended port and output bits. */
+sfr P4 = 0xC0;
+sbit OUTPUT1 = P3^5;  /* P3.5, LQFP-44 pin 6  */
+sbit OUTPUT2 = P4^7;  /* P4.7, LQFP-44 pin 7  */
 
 /*
  * STC15F2K60S2 (LQFP-44)
  * Physical package pin mapping used here:
  *   - Pin 6  -> P3.5 (Output 1)
- *   - Pin 7  -> P1.2 (Output 2)
+ *   - Pin 7  -> P4.7 (Output 2)
  *
  * Sequence in loop:
  * 1) Output 1 HIGH (steady),     wait 10 s
