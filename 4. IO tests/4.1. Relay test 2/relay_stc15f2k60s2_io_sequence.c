@@ -2,12 +2,12 @@
 
 #ifdef SDCC
 /* SDCC declarations for STC15 extended port and output bits. */
-__sbit __at (0xB5) OUTPUT1; /* P3.5, LQFP-44 pin 6 */
-__sbit __at (0x92) OUTPUT2; /* P1.2, LQFP-44 pin 7 */
+__sbit __at (0xB5) OUTPUT1; /* P3.5, LQFP-44 pin 6  */
+__sbit __at (0x92) OUTPUT2; /* P1.2, LQFP-44 pin 7  */
 #else
 /* Keil C51 declarations for output bits. */
-sbit OUTPUT1 = P3^5;  /* LQFP-44 pin 6 */
-sbit OUTPUT2 = P1^2;  /* LQFP-44 pin 7 */
+sbit OUTPUT1 = P3^5;  /* LQFP-44 pin 6  */
+sbit OUTPUT2 = P1^2;  /* LQFP-44 pin 7  */
 #endif
 
 /*
@@ -17,9 +17,10 @@ sbit OUTPUT2 = P1^2;  /* LQFP-44 pin 7 */
  *   - Pin 7  -> P1.2 (Output 2)
  *
  * Sequence in loop:
- * Output 2 HIGH (steady), always
  * 1) Output 1 HIGH (steady),     wait 10 s
- * 2) Output 1 LOW  (steady),     wait 10 s
+ * 2) Output 2 HIGH (steady),     wait 10 s
+ * 4) Output 1 LOW  (steady),     wait 10 s
+ * 5) Output 2 LOW  (steady),     wait 10 s
  */
 
 /*
@@ -55,12 +56,18 @@ static void delay_10s(void)
 
 void main(void)
 {
-    OUTPUT1 = 1;
+    OUTPUT1 = 0;
     OUTPUT2 = 0;
 
     while (1)
     {
+        OUTPUT1 = 1;
+        delay_10s();
+
         OUTPUT2 = 1;
+        delay_10s();
+
+        OUTPUT1 = 0;
         delay_10s();
 
         OUTPUT2 = 0;
