@@ -55,15 +55,15 @@ static void delay_10s(void)
 
 void main(void)
 {
-    OUTPUT1 = 0;
-    OUTPUT2 = 1;
+    OUTPUT1 = 1;
+    OUTPUT2 = 0;
 
     while (1)
     {
-        OUTPUT1 = 1;
+        OUTPUT2 = 1;
         delay_10s();
 
-        OUTPUT1 = 0;
+        OUTPUT2 = 0;
         delay_10s();
     }
 }
