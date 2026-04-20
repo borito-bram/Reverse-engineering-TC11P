@@ -1,6 +1,7 @@
-chip: STC15F2K60S2
+chip: STC15F2K48S2
 Chip package: LQFP-44
 
 
 P3.5 = enable 24V voltage regulator
 P1.2 = Relay motor down
+P4^7 = Relay motor up
