@@ -1,6 +1,7 @@
 param(
     [string]$SourceDir,
-    [string]$SourceFile
+    [string]$SourceFile,
+    [string]$BuildDir = "$env:TEMP\tc11p_keil_build"
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,17 +77,27 @@ $resolvedSourceDir = (Resolve-Path -LiteralPath $SourceDir).Path
 $resolvedSourceFile = Resolve-SourceFile -Dir $resolvedSourceDir -File $SourceFile
 $baseName = [System.IO.Path]::GetFileNameWithoutExtension($resolvedSourceFile)
 
+New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+$resolvedBuildDir = (Resolve-Path -LiteralPath $BuildDir).Path
+
+$buildSource = Join-Path $resolvedBuildDir ("{0}.c" -f $baseName)
+$buildHex = Join-Path $resolvedBuildDir ("{0}.hex" -f $baseName)
+$outputHex = Join-Path $resolvedSourceDir ("{0}.hex" -f $baseName)
+
+Copy-Item -LiteralPath $resolvedSourceFile -Destination $buildSource -Force
+
 $compiler = Find-KeilTool -ToolName "C51.EXE"
 $linker = Find-KeilTool -ToolName "BL51.EXE"
 $hexTool = Find-KeilTool -ToolName "OH51.EXE"
 
 Write-Host "Building with Keil C51:" -ForegroundColor Cyan
 Write-Host "  Source: $resolvedSourceFile"
+Write-Host "  WorkDir: $resolvedBuildDir"
 Write-Host "  C51:    $compiler"
 
-Push-Location $resolvedSourceDir
+Push-Location $resolvedBuildDir
 try {
-    & $compiler $resolvedSourceFile OBJECTEXTEND DEBUG
+    & $compiler $buildSource OBJECTEXTEND DEBUG
     if ($LASTEXITCODE -ne 0) {
         throw "C51 compilation failed with exit code $LASTEXITCODE"
     }
@@ -105,9 +116,10 @@ finally {
     Pop-Location
 }
 
-$hexPath = Join-Path $resolvedSourceDir ("{0}.hex" -f $baseName)
-if (-not (Test-Path -LiteralPath $hexPath)) {
-    throw "Expected HEX file was not produced: $hexPath"
+if (-not (Test-Path -LiteralPath $buildHex)) {
+    throw "Expected HEX file was not produced: $buildHex"
 }
 
-Write-Host "HEX created: $hexPath" -ForegroundColor Green
+Copy-Item -LiteralPath $buildHex -Destination $outputHex -Force
+
+Write-Host "HEX created: $outputHex" -ForegroundColor Green

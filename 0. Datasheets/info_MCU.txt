@@ -2,10 +2,12 @@ chip: STC15F2K48S2
 Chip package: LQFP-44
 
 
-P3.5 = enable 24V voltage regulator
-P1.2 = Relay motor down
+P3^5 = enable 24V voltage regulator
+P1^2 = Relay motor down
 P4^7 = Relay motor up
+P2^7 = Motor speed
 P1^4 = hall effect 1
 P1^5 = hall effect 2
 P5^5 = Button up
 P4^0 = Button down
+P2^6 = zoomer
