@@ -18,10 +18,22 @@ sbit OUTPUT2 = P4^7;  /* Motor up control:         P4.7 */
 sbit OUTPUT3 = P1^2;  /* Motor down control:       P1.2 */
 sbit PWM_OUT = P2^7;  /* PWM output (push-pull):   P2.7 */
 
+/* --- ADC SFRs (STC15) --- */
+sfr P1ASF     = 0x9D; /* P1 analog function enable (1 = analog) */
+sfr ADC_CONTR = 0xBC; /* ADC control register                   */
+sfr ADC_RES   = 0xBD; /* ADC result high 8 bits (left-adjusted) */
+sfr ADC_RESL  = 0xBE; /* ADC result low 2 bits                  */
+
+#define ADC_POWER   0x80 /* power on ADC module       */
+#define ADC_SPEEDLL 0x00 /* 540 clocks/conv (slowest) */
+#define ADC_FLAG    0x10 /* conversion-done flag      */
+#define ADC_START   0x08 /* start conversion          */
+#define ADC_CH(n)   ((n) & 0x07)
+
 /*
  * STC15F2K48S2 (LQFP-44)
  *
- * Serial protocol on UART1 (P3.0 RXD / P3.1 TXD), 9600-8-N-1:
+ * Serial protocol on UART1 (P3.0 RXD / P3.1 TXD), 115200-8-N-1:
  *   u / U        -> motor up
  *   d / D        -> motor down
  *   s / S        -> motor stop
@@ -30,10 +42,10 @@ sbit PWM_OUT = P2^7;  /* PWM output (push-pull):   P2.7 */
  * PWM: software PWM on P2.7, ~100 Hz, 1% resolution.
  *      Timer0 fires every 100 us (1T mode @ 11.0592 MHz).
  *
- * Baud rate: 9600 @ 11.0592 MHz, Timer1 1T mode
+ * Baud rate: 115200 @ 11.0592 MHz, Timer1 1T mode
  */
 #define FOSC        11059200L
-#define BAUD        9600L
+#define BAUD        115200L
 #define T1_RELOAD   (65536 - FOSC / 4 / BAUD)
 
 /* 100 us per PWM tick -> 100 Hz PWM period (100 ticks) */
@@ -45,7 +57,11 @@ sbit PWM_OUT = P2^7;  /* PWM output (push-pull):   P2.7 */
 static volatile unsigned char pwm_tick = 0;
 static volatile unsigned char pwm_duty = 0;   /* 0-100 */
 
-/* ---------- Timer0 ISR: software PWM on P2.7 ---------- */
+/* ADC report timer: incremented every 100 us by Timer0 ISR */
+static volatile unsigned int adc_tick = 0;
+#define ADC_REPORT_TICKS 5000U /* 5000 x 100 us = 500 ms */
+
+/* ---------- Timer0 ISR: software PWM on P2.7 + ADC tick ---------- */
 void timer0_isr(void) interrupt 1
 {
     pwm_tick++;
@@ -54,6 +70,69 @@ void timer0_isr(void) interrupt 1
         pwm_tick = 0;
     }
     PWM_OUT = (pwm_tick < pwm_duty) ? 1 : 0;
+
+    if (adc_tick < 65535U)
+    {
+        adc_tick++;
+    }
+}
+
+/* ---------- ADC ---------- */
+
+static void adc_init(void)
+{
+    /* P1.0 = current sense (ADC ch0), P1.1 = supply voltage (ADC ch1) */
+    P1ASF    = 0x03;                        /* mark P1.0 and P1.1 as analog */
+    ADC_CONTR = ADC_POWER | ADC_SPEEDLL;    /* power up ADC, slow conversion */
+    /* First throwaway conversion in adc_read_stable() handles ADC settling. */
+}
+
+/* Returns one 10-bit result (0..1023) for the given channel. */
+static unsigned int adc_read_once(unsigned char ch)
+{
+    ADC_CONTR = ADC_POWER | ADC_SPEEDLL | ADC_START | ADC_CH(ch);
+    while ((ADC_CONTR & ADC_FLAG) == 0)
+        ;                        /* busy-wait for conversion done */
+    ADC_CONTR &= ~ADC_FLAG;      /* clear flag                    */
+    return ((unsigned int)ADC_RES << 2) | (ADC_RESL & 0x03);
+}
+
+/*
+ * Stable ADC read:
+ * - discard first conversion after channel select (settling)
+ * - oversample 8 readings and average by right-shifting (fast on 8051)
+ * - all samples included: zero is a valid ADC value
+ */
+static unsigned int adc_read_stable(unsigned char ch)
+{
+    unsigned long sum = 0UL;
+    unsigned char i;
+
+    (void)adc_read_once(ch); /* throwaway conversion: flush channel-switch settling */
+
+    for (i = 0; i < 8; i++)
+    {
+        sum += (unsigned long)adc_read_once(ch);
+    }
+
+    return (unsigned int)(sum >> 3); /* divide by 8 */
+}
+
+static unsigned int read_motor_current_raw(void)
+{
+    /* Sync to the start of the PWM on-period so all samples are taken at the
+     * same phase of the switching cycle, eliminating PWM ripple bias. */
+    if (pwm_duty > 0U)
+    {
+        while (pwm_tick != 0U)
+            ;
+    }
+    return adc_read_stable(0); /* channel 0 = P1.0, current sense */
+}
+
+static unsigned int read_supply_voltage_raw(void)
+{
+    return adc_read_stable(1); /* channel 1 = P1.1, supply voltage divider */
 }
 
 /* ---------- UART ---------- */
@@ -124,6 +203,48 @@ static void uart_send_uint(unsigned char value)
     {
         digits[count++] = (unsigned char)('0' + (value % 10));
         value /= 10;
+    }
+    while (count != 0)
+    {
+        uart_send_char(digits[--count]);
+    }
+}
+
+/* Print a 16-bit unsigned integer (0..65535) over UART. */
+static void uart_send_uint16(unsigned int value)
+{
+    unsigned char digits[5];
+    unsigned char count = 0;
+    if (value == 0)
+    {
+        uart_send_char('0');
+        return;
+    }
+    while (value != 0)
+    {
+        digits[count++] = (unsigned char)('0' + (unsigned char)(value % 10U));
+        value /= 10U;
+    }
+    while (count != 0)
+    {
+        uart_send_char(digits[--count]);
+    }
+}
+
+/* Print a 32-bit unsigned integer (0..4294967295) over UART. */
+static void uart_send_uint32(unsigned long value)
+{
+    unsigned char digits[10];
+    unsigned char count = 0;
+    if (value == 0UL)
+    {
+        uart_send_char('0');
+        return;
+    }
+    while (value != 0UL)
+    {
+        digits[count++] = (unsigned char)('0' + (unsigned char)(value % 10UL));
+        value /= 10UL;
     }
     while (count != 0)
     {
@@ -257,14 +378,46 @@ static void process_uart_commands(void)
 
 void main(void)
 {
+    unsigned int i_raw, v_raw;
+    unsigned int i_raw_last_nonzero = 0;
+    unsigned long i_scaled, v_scaled;
+
     uart_init();
+    adc_init();
     motor_stop();
     PWM_OUT = 0;
 
-    uart_send_str("Ready. u=motor up  d=motor down  s=motor stop  0-100=PWM duty%\r\n");
+    uart_send_str("Ready. u=up  d=down  s=stop  0-100=PWM%  ADC@500ms: I V\r\n");
 
     while (1)
     {
         process_uart_commands();
+
+        if (adc_tick >= ADC_REPORT_TICKS)
+        {
+            adc_tick = 0;
+            i_raw = read_motor_current_raw();
+            v_raw = read_supply_voltage_raw();
+
+            if ((OUTPUT1 != 0) && ((OUTPUT2 != 0) || (OUTPUT3 != 0)))
+            {
+                if ((i_raw == 0U) && (i_raw_last_nonzero != 0U))
+                {
+                    i_raw = i_raw_last_nonzero;
+                }
+            }
+            if (i_raw != 0U)
+            {
+                i_raw_last_nonzero = i_raw;
+            }
+
+            i_scaled = (unsigned long)i_raw * 96UL;
+            v_scaled = (unsigned long)v_raw * 64UL;
+            uart_send_str("I=");
+            uart_send_uint32(i_scaled);
+            uart_send_str(" V=");
+            uart_send_uint32(v_scaled);
+            uart_send_str("\r\n");
+        }
     }
 }

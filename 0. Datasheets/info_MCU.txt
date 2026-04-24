@@ -11,3 +11,5 @@ P1^5 = hall effect 2
 P5^5 = Button up
 P4^0 = Button down
 P2^6 = zoomer
+P1^1 = supply voltage
+P1^0 = current sense

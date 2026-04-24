@@ -21,16 +21,16 @@ sbit INPUT2  = P1^5;  /* P1.5 - high-impedance input      */
  * Monitors and prints state of P1.4 and P1.5 every second.
  * Serialprint same as programming port (P3.0 RXD / P3.1 TXD, UART1)
  *
- * Baud rate: 9600 @ 11.0592 MHz, Timer1 1T mode (AUXR.T1x12=1)
+ * Baud rate: 115200 @ 11.0592 MHz, Timer1 1T mode (AUXR.T1x12=1)
  * Formula (from STC reference): 65536 - FOSC/4/baud
- *   = 65536 - 11059200/4/9600 = 65248 = 0xFF20
+ *   = 65536 - 11059200/4/115200 = 65512 = 0xFFE8
  */
 #define FOSC        11059200L
-#define BAUD        9600L
+#define BAUD        115200L
 #define T1_RELOAD   (65536 - FOSC / 4 / BAUD)
 
 /*
- * UART1 init: 9600 baud, mode 1 (8-bit), no parity.
+ * UART1 init: 115200 baud, mode 1 (8-bit), no parity.
  * Timer1 in STC15 mode 0 (16-bit auto-reload), 1T.
  * UART1 TX = P3.1, RX = P3.0 (same as ISP programming port).
  *

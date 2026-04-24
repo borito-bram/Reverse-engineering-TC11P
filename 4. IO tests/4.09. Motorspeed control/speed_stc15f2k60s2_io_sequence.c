@@ -21,7 +21,7 @@ sbit PWM_OUT = P2^7;  /* PWM output (push-pull):   P2.7 */
 /*
  * STC15F2K48S2 (LQFP-44)
  *
- * Serial protocol on UART1 (P3.0 RXD / P3.1 TXD), 9600-8-N-1:
+ * Serial protocol on UART1 (P3.0 RXD / P3.1 TXD), 115200-8-N-1:
  *   u / U        -> motor up
  *   d / D        -> motor down
  *   s / S        -> motor stop
@@ -30,10 +30,10 @@ sbit PWM_OUT = P2^7;  /* PWM output (push-pull):   P2.7 */
  * PWM: software PWM on P2.7, ~100 Hz, 1% resolution.
  *      Timer0 fires every 100 us (1T mode @ 11.0592 MHz).
  *
- * Baud rate: 9600 @ 11.0592 MHz, Timer1 1T mode
+ * Baud rate: 115200 @ 11.0592 MHz, Timer1 1T mode
  */
 #define FOSC        11059200L
-#define BAUD        9600L
+#define BAUD        115200L
 #define T1_RELOAD   (65536 - FOSC / 4 / BAUD)
 
 /* 100 us per PWM tick -> 100 Hz PWM period (100 ticks) */

@@ -1,0 +1,344 @@
+#include <REG51.H>
+
+/* SFR declarations for STC15 (not in standard REG51.H) */
+sfr AUXR = 0x8E;
+sfr P4   = 0xC0;
+sfr P5   = 0xC8;
+
+sfr P1M1 = 0x91;   /* PxM1.n, PxM0.n = 00 -> quasi-bidirectional  */
+sfr P1M0 = 0x92;   /*                 = 01 -> push-pull output     */
+sfr P3M1 = 0xB1;
+sfr P3M0 = 0xB2;
+sfr P4M1 = 0xB3;
+sfr P4M0 = 0xB4;
+sfr P5M1 = 0xC9;
+sfr P5M0 = 0xCA;
+                   /*                 = 10 -> high-impedance input */
+                   /*                 = 11 -> open-drain           */
+
+sbit OUTPUT1 = P3^5;  /* Voltage regulator enable: P3.5 */
+sbit OUTPUT2 = P4^7;  /* Motor up control:         P4.7 */
+sbit OUTPUT3 = P1^2;  /* Motor down control:       P1.2 */
+
+sbit BTN_UP   = P5^5; /* Push button UP command:   P5.5 (from 4.03) */
+sbit BTN_DOWN = P4^0; /* Push button DOWN command: P4.0 (from 4.03) */
+
+sbit LS_UP   = P1^4;  /* Upper limit switch: P1.4 (quasi-bidir, internal pull-up) */
+sbit LS_DOWN = P1^5;  /* Lower limit switch: P1.5 (quasi-bidir, internal pull-up) */
+
+/*
+ * STC15F2K48S2 (LQFP-44)
+ *
+ * Motor control with hardware limit switches and push buttons.
+ * The motor is free to move in either direction unless the corresponding
+ * limit switch is triggered.
+ *
+ * Pin assignments:
+ *   P1.2  -> OUTPUT3  (motor DOWN, push-pull output)
+ *   P1.4  -> LS_UP    (upper limit switch, quasi-bidir input)
+ *   P1.5  -> LS_DOWN  (lower limit switch, quasi-bidir input)
+ *   P3.5  -> OUTPUT1  (voltage regulator enable, push-pull output)
+ *   P4.7  -> OUTPUT2  (motor UP, push-pull output)
+ *   P5.5  -> BTN_UP   (push button UP command input, from 4.03)
+ *   P4.0  -> BTN_DOWN (push button DOWN command input, from 4.03)
+ *
+ * Serial protocol on UART1 (P3.0 RXD / P3.1 TXD), 115200-8-N-1:
+ *   u / U  -> motor up
+ *   d / D  -> motor down
+ *   s / S  -> motor stop + print status
+ */
+#define FOSC        11059200L
+#define BAUD        115200L
+#define T1_RELOAD   (65536 - FOSC / 4 / BAUD)
+
+#define DIR_STOP 0
+#define DIR_UP   1
+#define DIR_DOWN 2
+
+/* Reads are inverted in this setup: HIGH means switch triggered. */
+#define LS_UP_TRIG      (LS_UP)
+#define LS_DOWN_TRIG    (LS_DOWN)
+#define BTN_UP_ACTIVE   (!BTN_UP)
+#define BTN_DOWN_ACTIVE (!BTN_DOWN)
+
+static unsigned char motor_dir = DIR_STOP;
+static bit last_ls_up = 0;
+static bit last_ls_down = 0;
+static bit last_btn_up = 0;
+static bit last_btn_down = 0;
+static bit button_drive_active = 0;
+
+/* ---------- UART ---------- */
+
+static void uart_init(void)
+{
+    AUXR  = 0xC0;   /* T0x12=1, T1x12=1: both timers in 1T mode */
+
+    /* P1.2 push-pull output, P1.4/P1.5 quasi-bidir inputs */
+    P1M1 &= (unsigned char)~0x34;
+    P1M0 &= (unsigned char)~0x34;
+    P1M0 |= 0x04;
+
+    /* P3.5 push-pull output */
+    P3M1 &= (unsigned char)~0x20;
+    P3M0 |= 0x20;
+
+    /* P4.7 push-pull output */
+    P4M1 &= (unsigned char)~0x80;
+    P4M0 |= 0x80;
+
+    /* P5.5 button input quasi-bidir */
+    P5M1 &= (unsigned char)~0x20;
+    P5M0 &= (unsigned char)~0x20;
+
+    /* P4.0 button input quasi-bidir */
+    P4M1 &= (unsigned char)~0x01;
+    P4M0 &= (unsigned char)~0x01;
+
+    SCON  = 0x50;
+    TMOD  = 0x00;
+    TH1   = (unsigned char)(T1_RELOAD >> 8);
+    TL1   = (unsigned char)(T1_RELOAD);
+    TR1   = 1;
+
+    EA = 1;
+}
+
+static void uart_send_char(unsigned char c)
+{
+    SBUF = c;
+    while (!TI);
+    TI = 0;
+}
+
+static void uart_send_str(const char *s)
+{
+    while (*s)
+    {
+        uart_send_char((unsigned char)*s);
+        s++;
+    }
+}
+
+static bit uart_try_read_char(unsigned char *c)
+{
+    if (!RI)
+        return 0;
+
+    RI = 0;
+    *c = SBUF;
+    return 1;
+}
+
+/* ---------- Motor control ---------- */
+
+static void motor_stop(void)
+{
+    OUTPUT1   = 0;
+    OUTPUT2   = 0;
+    OUTPUT3   = 0;
+    motor_dir = DIR_STOP;
+}
+
+static bit motor_up(void)
+{
+    if (LS_UP_TRIG)
+    {
+        motor_stop();
+        uart_send_str("LIMIT UP\r\n");
+        return 0;
+    }
+
+    OUTPUT3   = 0;
+    OUTPUT1   = 1;
+    OUTPUT2   = 1;
+    motor_dir = DIR_UP;
+    return 1;
+}
+
+static bit motor_down(void)
+{
+    if (LS_DOWN_TRIG)
+    {
+        motor_stop();
+        uart_send_str("LIMIT DOWN\r\n");
+        return 0;
+    }
+
+    OUTPUT2   = 0;
+    OUTPUT1   = 1;
+    OUTPUT3   = 1;
+    motor_dir = DIR_DOWN;
+    return 1;
+}
+
+/* ---------- Status ---------- */
+
+static void report_status(void)
+{
+    uart_send_str("LS_UP=");
+    uart_send_char(LS_UP_TRIG ? '1' : '0');
+    uart_send_str(" LS_DOWN=");
+    uart_send_char(LS_DOWN_TRIG ? '1' : '0');
+    uart_send_str(" BTN_UP=");
+    uart_send_char(BTN_UP_ACTIVE ? '1' : '0');
+    uart_send_str(" BTN_DOWN=");
+    uart_send_char(BTN_DOWN_ACTIVE ? '1' : '0');
+    uart_send_str(" MOTOR=");
+
+    if (motor_dir == DIR_UP)
+        uart_send_str("UP");
+    else if (motor_dir == DIR_DOWN)
+        uart_send_str("DOWN");
+    else
+        uart_send_str("STOP");
+
+    uart_send_str("\r\n");
+}
+
+static void report_inputs_if_changed(void)
+{
+    bit cur_ls_up = LS_UP_TRIG;
+    bit cur_ls_down = LS_DOWN_TRIG;
+    bit cur_btn_up = BTN_UP_ACTIVE;
+    bit cur_btn_down = BTN_DOWN_ACTIVE;
+
+    if ((cur_ls_up != last_ls_up) || (cur_ls_down != last_ls_down) ||
+        (cur_btn_up != last_btn_up) || (cur_btn_down != last_btn_down))
+    {
+        last_ls_up = cur_ls_up;
+        last_ls_down = cur_ls_down;
+        last_btn_up = cur_btn_up;
+        last_btn_down = cur_btn_down;
+        report_status();
+    }
+}
+
+/* ---------- Inputs ---------- */
+
+static void process_button_commands(void)
+{
+    bit up_active = BTN_UP_ACTIVE;
+    bit down_active = BTN_DOWN_ACTIVE;
+
+    if (up_active && !down_active)
+    {
+        if (motor_dir != DIR_DOWN)
+        {
+            if (motor_down())
+            {
+                uart_send_str("BTN UP->DOWN\r\n");
+                button_drive_active = 1;
+            }
+            report_status();
+        }
+    }
+    else if (down_active && !up_active)
+    {
+        if (motor_dir != DIR_UP)
+        {
+            if (motor_up())
+            {
+                uart_send_str("BTN DOWN->UP\r\n");
+                button_drive_active = 1;
+            }
+            report_status();
+        }
+    }
+    else if (up_active && down_active)
+    {
+        if (motor_dir != DIR_STOP)
+        {
+            motor_stop();
+            button_drive_active = 0;
+            uart_send_str("BTN BOTH - STOP\r\n");
+            report_status();
+        }
+    }
+    else
+    {
+        if (button_drive_active && (motor_dir != DIR_STOP))
+        {
+            motor_stop();
+            button_drive_active = 0;
+            uart_send_str("BTN RELEASE - STOP\r\n");
+            report_status();
+        }
+    }
+}
+
+static void process_uart_commands(void)
+{
+    unsigned char c;
+
+    while (uart_try_read_char(&c))
+    {
+        if ((c == 'u') || (c == 'U'))
+        {
+            button_drive_active = 0;
+            if (motor_up())
+                uart_send_str("MOTOR UP\r\n");
+            report_status();
+        }
+        else if ((c == 'd') || (c == 'D'))
+        {
+            button_drive_active = 0;
+            if (motor_down())
+                uart_send_str("MOTOR DOWN\r\n");
+            report_status();
+        }
+        else if ((c == 's') || (c == 'S'))
+        {
+            motor_stop();
+            button_drive_active = 0;
+            uart_send_str("MOTOR STOP\r\n");
+            report_status();
+        }
+    }
+}
+
+/* ---------- Main ---------- */
+
+void main(void)
+{
+    uart_init();
+
+    /* Release input pins high for quasi-bidir sampling */
+    LS_UP = 1;
+    LS_DOWN = 1;
+    BTN_UP = 1;
+    BTN_DOWN = 1;
+
+    motor_stop();
+
+    last_ls_up = LS_UP_TRIG;
+    last_ls_down = LS_DOWN_TRIG;
+    last_btn_up = BTN_UP_ACTIVE;
+    last_btn_down = BTN_DOWN_ACTIVE;
+
+    uart_send_str("READY u=up d=down s=stop\r\n");
+    report_status();
+
+    while (1)
+    {
+        process_uart_commands();
+        process_button_commands();
+
+        if ((motor_dir == DIR_UP) && LS_UP_TRIG)
+        {
+            motor_stop();
+            button_drive_active = 0;
+            uart_send_str("LIMIT UP - STOPPED\r\n");
+            report_status();
+        }
+        else if ((motor_dir == DIR_DOWN) && LS_DOWN_TRIG)
+        {
+            motor_stop();
+            button_drive_active = 0;
+            uart_send_str("LIMIT DOWN - STOPPED\r\n");
+            report_status();
+        }
+
+        report_inputs_if_changed();
+    }
+}

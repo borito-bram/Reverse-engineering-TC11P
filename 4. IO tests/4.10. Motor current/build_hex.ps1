@@ -103,7 +103,7 @@ try {
     }
 
     & $linker "$baseName.OBJ" TO $baseName
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -gt 1) {
         throw "BL51 link failed with exit code $LASTEXITCODE"
     }
 

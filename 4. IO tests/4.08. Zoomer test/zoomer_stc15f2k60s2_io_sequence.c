@@ -10,13 +10,13 @@ sbit P2_6 = P2^6;
 
 /*
  * STC15F2K60S2 (LQFP-44)
- * UART1: P3.0 RXD / P3.1 TXD, 9600-8-N-1 @ 11.0592 MHz
+ * UART1: P3.0 RXD / P3.1 TXD, 115200-8-N-1 @ 11.0592 MHz
  *
  * Sequence: P2.6 HIGH for 10 s, then LOW for 10 s, repeat.
  */
 
 #define FOSC      11059200L
-#define BAUD      9600L
+#define BAUD      115200L
 #define T1_RELOAD (65536 - FOSC / 4 / BAUD)
 
 /* ---------- UART helpers ---------- */
